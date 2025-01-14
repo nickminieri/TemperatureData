@@ -1,0 +1,92 @@
+% Load the data
+data = readtable('**'); % '**' put to substitute csv file location
+
+% Convert time to datetime format with timezone handling
+data.time = datetime(data.time, 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSSSSSXXX', 'TimeZone', 'UTC');
+data.time.TimeZone = ''; % Remove timezone information after conversion
+
+% Remove the heatsource data point (assuming the highest value is the heatsource)
+maxTemp = max(data.temperature);
+data = data(data.temperature < maxTemp, :);
+
+% Calculate time intervals
+startTime = min(data.time);
+endTime = max(data.time);
+timeIntervals = startTime:minutes(10):endTime; % Using ten-minute intervals
+
+% Prepare a list of unique device IDs
+deviceIDs = unique(data.deveui);
+
+% Initialize the heatmap data table
+heatmapData = array2table(nan(length(deviceIDs), length(timeIntervals)-1), ...
+    'RowNames', deviceIDs, 'VariableNames', cellstr(datestr(timeIntervals(1:end-1), 'HH:MM:SS')));
+
+% Populate the heatmap data table with average temperatures
+for i = 1:length(timeIntervals)-1
+    % Extract data for the current interval
+    intervalData = data(data.time >= timeIntervals(i) & data.time < timeIntervals(i+1), :);
+    
+    if ~isempty(intervalData)
+        % Calculate average temperature for each device in the interval
+        avgTemps = varfun(@mean, intervalData, 'InputVariables', 'temperature', ...
+            'GroupingVariables', 'deveui');
+        
+        % Update the heatmap data table
+        for j = 1:height(avgTemps)
+            heatmapData{avgTemps.deveui{j}, datestr(timeIntervals(i), 'HH:MM:SS')} = avgTemps.mean_temperature(j);
+        end
+    end
+end
+
+% Convert the heatmap data table to array for plotting
+heatmapArray = table2array(heatmapData);
+
+% Plot the heatmap
+figure;
+h = heatmap(cellstr(datestr(timeIntervals(1:end-1), 'HH:MM:SS')), deviceIDs, heatmapArray, ...
+    'Colormap', parula, 'ColorbarVisible', 'on', 'CellLabelFormat', '%.2f');
+h.Title = 'Temperature Heatmap';
+h.XLabel = 'Time Interval';
+h.YLabel = 'Device ID';
+h.XDisplayLabels = strrep(h.XDisplayLabels, '_', '\_'); % Improve readability of labels
+
+figure;
+hold on;
+for i = 1:length(deviceIDs)
+    deviceData = data(strcmp(data.deveui, deviceIDs{i}), :);
+    plot(deviceData.time, deviceData.temperature, 'DisplayName', deviceIDs{i});
+end
+hold off;
+legend;
+title('Line Plot: Temperature Over Time for Each Device');
+xlabel('Time');
+ylabel('Temperature (°C)');
+datetick('x', 'HH:MM:SS', 'keepticks');
+
+figure;
+boxplot(data.temperature, data.deveui);
+title('Box Plot: Temperature Distribution for Each Device');
+xlabel('Device ID');
+ylabel('Temperature (°C)');
+xtickangle(45);
+
+figure;
+histogram(data.temperature, 'BinWidth', 0.5);
+title('Histogram: Overall Temperature Distribution');
+xlabel('Temperature (°C)');
+ylabel('Frequency');
+
+figure;
+scatter(data.time, data.temperature, 'filled');
+title('Scatter Plot: Temperature vs. Time');
+xlabel('Time');
+ylabel('Temperature (°C)');
+datetick('x', 'HH:MM:SS', 'keepticks');
+
+avgTempByDevice = varfun(@mean, data, 'InputVariables', 'temperature', 'GroupingVariables', 'deveui');
+figure;
+bar(categorical(avgTempByDevice.deveui), avgTempByDevice.mean_temperature);
+title('Bar Plot: Average Temperature for Each Device');
+xlabel('Device ID');
+ylabel('Average Temperature (°C)');
+xtickangle(45);
